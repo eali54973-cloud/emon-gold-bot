@@ -1,5 +1,4 @@
-import os
-from flask import Flask, render_template_string
+render_template_string
 from threading import Thread
 import telebot
 import yfinance as yf
@@ -100,3 +99,4 @@ if __name__ == "__main__":
     Thread(target=run_b).start()
     run_w()
 j
+            
