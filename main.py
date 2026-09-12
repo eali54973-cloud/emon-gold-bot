@@ -99,3 +99,4 @@ def run_w():
 if __name__ == "__main__":
     Thread(target=run_b).start()
     run_w()
+j
