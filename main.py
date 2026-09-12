@@ -1,23 +1,27 @@
-render_template_string
+import os, requests
+from flask import Flask, render_template_string
 from threading import Thread
 import telebot
-import yfinance as yf
+import pandas as pd
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
 bot = telebot.TeleBot(BOT_TOKEN) if BOT_TOKEN else None
 app = Flask(__name__)
 
 def get_data(interval):
+    mapping = {"1d":"1d", "1h":"1h", "30m":"30m", "15m":"15m"}
+    b_interval = mapping.get(interval, "1h")
+    url = f"https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval={b_interval}&limit=200"
     try:
-        # XAUUSD এর জন্য 2টা symbol try করবে
-        for symbol in ["XAUUSD=X", "GC=F", "GOLD"]:
-            df = yf.download(symbol, period="1mo", interval=interval, progress=False, auto_adjust=True)
-            if not df.empty and len(df) > 50:
-                # yfinance new version fix
-                if 'Close' in df.columns:
-                    return df
-        return None
+        r = requests.get(url, timeout=10).json()
+        if not r or isinstance(r, dict):
+            return None
+        df = pd.DataFrame(r, columns=['time','Open','High','Low','Close','Vol','c2','c3','c4','c5','c6','c7'])
+        df['Close'] = df['Close'].astype(float)
+        df['High'] = df['High'].astype(float)
+        df['Low'] = df['Low'].astype(float)
+        df['Open'] = df['Open'].astype(float)
+        return df
     except:
         return None
 
@@ -26,36 +30,30 @@ def analyze():
     res = {}
     score = 0
     price = 0
-
     for name, interval in tfs.items():
         df = get_data(interval)
         if df is None:
             res[name] = "⏳ Loading..."
             continue
-
         try:
             close = df['Close'].iloc[-1]
             if name == "1H":
                 price = float(close)
-
             ema50 = df['Close'].ewm(span=50).mean().iloc[-1]
             ema200 = df['Close'].ewm(span=200).mean().iloc[-1]
             high20 = df['High'].tail(20).max()
+            low20 = df['Low'].tail(20).min()
 
-            # SMC BOS Logic
-            is_bullish = close > (high20 * 0.999) and ema50 > ema200
-            is_bearish = close < (df['Low'].tail(20).min() * 1.001) and ema50 < ema200
-
-            if is_bullish:
+            if close > high20 * 0.998 and ema50 > ema200:
                 res[name] = "✅ Bullish BOS"
                 score += 2
-            elif is_bearish:
+            elif close < low20 * 1.002 and ema50 < ema200:
                 res[name] = "🔻 Bearish BOS"
-                score += 0
+                score += 1
             else:
-                res[name] = "❌ No BOS / CHoCH"
-        except Exception as e:
-            res[name] = f"❌ Error"
+                res[name] = "❌ No BOS"
+        except:
+            res[name] = "❌ Error"
 
     quality = f"{score}/8"
     is_a_plus = score >= 6
@@ -63,30 +61,19 @@ def analyze():
 
 @app.route('/')
 def home():
-    r, q, a, p = analyze()
-    return render_template_string("""
-    <h2>XAU SMC BOT @Emon_sheak LIVE ✅</h2>
+    r,q,a,p = analyze()
+    html = """
+    <h2>XAU SMC BOT LIVE ✅ @Emon_sheak</h2>
     <h3>Price: {{p}} | Quality: {{q}} | A+: {{a}}</h3>
     {% for k,v in r.items() %}<p><b>{{k}}:</b> {{v}}</p>{% endfor %}
-    """, r=r, q=q, a=a, p=round(p,2))
+    """
+    return render_template_string(html, r=r, q=q, a=a, p=round(p,2))
 
-@bot.message_handler(commands=['start','signal','analysis'])
+@bot.message_handler(commands=['start','signal'])
 def sig(m):
-    r, q, a, p = analyze()
-    text = f"""🔥 XAU GOLD SMC SIGNAL 🔥
-💰 Price: {round(p,2)}
-📊 Quality: {q} {'🔥 A+ SETUP' if a else ''}
-
-4H: {r.get('4H')}
-1H: {r.get('1H')}
-30M: {r.get('30M')}
-15M: {r.get('15M')}
-
-{'✅ STRONG BUY' if a else '⏳ WAIT FOR A+ (6/8+)'}
-
-@Emon_sheak
-"""
-    bot.reply_to(m, text)
+    r,q,a,p = analyze()
+    txt = f"🔥 XAU GOLD SMC SIGNAL 🔥\n💰 Price: {round(p,2)} (PAXG ~ XAU)\n📊 Quality: {q} {'🔥 A+ SETUP' if a else ''}\n\n4H: {r.get('4H')}\n1H: {r.get('1H')}\n30M: {r.get('30M')}\n15M: {r.get('15M')}\n\n{'✅ STRONG SIGNAL' if a else '⏳ WAIT FOR A+ (6/8+)'} \n@Emon_sheak"
+    bot.reply_to(m, txt)
 
 def run_b():
     if bot:
@@ -98,5 +85,3 @@ def run_w():
 if __name__ == "__main__":
     Thread(target=run_b).start()
     run_w()
-j
-            
